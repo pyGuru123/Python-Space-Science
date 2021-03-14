@@ -1,7 +1,14 @@
+import os
+import threading
+import webbrowser
+from functools import partial
+
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import PhotoImage
-from functools import partial
+from tkinter import messagebox
+
+from services import RoverImageDownloader, CredentialWindow, read_credentials
 
 
 class Application(tk.Frame):
@@ -29,7 +36,13 @@ class Application(tk.Frame):
 
 		self.sol_var = tk.StringVar()
 		self.date_var = tk.StringVar()
-		self.latest_var = tk.IntVar()
+		self.sol_var.trace('w', self.reset_date)
+		self.date_var.trace('w', self.reset_sols)
+
+		self.num_imgs = tk.IntVar()
+		self.num_imgs.set(1)
+
+		self.RIDownloader = RoverImageDownloader()
 
 		self.draw_frames()
 		self.draw_buttons()
@@ -42,7 +55,7 @@ class Application(tk.Frame):
 		self.rightlabel = tk.Frame(self, width=400, height=40, bg='#252525', highlightthickness=1)
 		self.rightbar1 = tk.Frame(self, width=200, height=410, bg='white')
 		self.rightbar2 = tk.Frame(self, width=200, height=410, bg='white')
-		self.bottomBox = tk.Frame(self, width=400, height=50, bg='dodgerblue3') 
+		self.bottomBox = tk.Frame(self, width=400, height=50, bg='white') 
 
 		self.topbar.grid(row=0, column=0, columnspan=3)
 		self.imgFrame.grid(row=1, column=0, rowspan=2)
@@ -64,10 +77,21 @@ class Application(tk.Frame):
 					highlightthickness=0)
 		self.canvas.grid(row=0, column=0, padx=0, pady=0)
 
-		tk.Label(self.rightlabel, text='Select Camera', bg='#252525', fg='white', font=('veradan', 10, 'bold')
+		tk.Label(self.rightlabel, text='Select Camera', bg='#252525', fg='white', font=('verdana', 10, 'bold')
 					).grid(row=0, column=0, pady=5, padx=30)
-		tk.Label(self.rightlabel, text='Select Day', bg='#252525', fg='white', font=('veradan', 10, 'bold')
+		tk.Label(self.rightlabel, text='Select Day', bg='#252525', fg='white', font=('verdana', 10, 'bold')
 					).grid(row=0, column=1, pady=5, padx=90)
+
+		self.fetch = ttk.Button(self.bottomBox, text='Fetch Resources', width=16,
+						command=self.fetch_resources)
+		self.fetch.grid(row=0, column=0, padx=(30,0), pady=10)
+
+		self.download = ttk.Button(self.bottomBox, text='Download Images', width=16, state=tk.DISABLED)
+		self.download.grid(row=0, column=1, padx=(30,0), pady=10)
+
+		self.open = ttk.Button(self.bottomBox, text='Open', width=12, state=tk.DISABLED,
+						command=lambda : self.open_folder(self.current_rover))
+		self.open.grid(row=0, column=2, padx=(30,0), pady=10)
 
 	def draw_date_frame(self):
 		ttk.Label(self.rightbar2, text='Enter Sol ( Martian Day )',
@@ -76,12 +100,14 @@ class Application(tk.Frame):
 		self.solEntry.grid(row=1, column=0, padx=30, pady=(5,0))
 
 		ttk.Label(self.rightbar2, text='Enter Earth Date\n( YYYY-MM-DD )',
-						width=20, anchor=tk.CENTER).grid(row=2, column=0, padx=30, pady=(45,0))
+						width=20, anchor=tk.CENTER).grid(row=2, column=0, padx=30, pady=(30,0))
 		self.dateEntry = ttk.Entry(self.rightbar2, width=20, textvariable=self.date_var)
 		self.dateEntry.grid(row=3, column=0, padx=30, pady=(5,0))
 
-		self.latest = ttk.Checkbutton(self.rightbar2, text='Get Latest', width=13, variable=self.latest_var)
-		self.latest.grid(row=4, column=0, pady=(45,0), padx=30)
+		ttk.Label(self.rightbar2, text='Number of Images\n(1<= images <=100)',
+						width=20, anchor=tk.CENTER).grid(row=5, column=0, padx=30, pady=(40,0))
+		self.num_img_en = ttk.Entry(self.rightbar2, width=10, textvariable=self.num_imgs)
+		self.num_img_en.grid(row=6, column=0, padx=30, pady=5)
 
 	def draw_buttons(self):
 		cindex = 0
@@ -96,15 +122,12 @@ class Application(tk.Frame):
 		self.set_selection(self.btn_list[0], self.rovers[0])
 
 		self.settings_btn = tk.Button(self.topbar, image=settings_icon, bg='#252525',
-						relief=tk.FLAT)
+						relief=tk.FLAT, command=self.creds_win)
 		self.settings_btn.grid(row=0, column=5, padx=(70,0))
 
 	def set_selection(self, widget, text):
 		for w in self.topbar.winfo_children()[:4]:
 			w.config(relief=tk.FLAT, bg='#e84545')
-
-		for w in self.bottomBox.winfo_children():
-			w.destroy()
 
 		for w in self.rightbar1.winfo_children():
 			w.destroy()
@@ -124,17 +147,59 @@ class Application(tk.Frame):
 			else:
 				pady=2
 			ttk.Radiobutton(self.rightbar1, text=text, variable=self.current_camera,
-					value=value, command=self.show_option, width=25).grid(row=r, column=0, padx=15, pady=pady)
+					value=value, width=25).grid(row=r, column=0, padx=15, pady=pady)
 			r += 1
 		self.current_camera.set(1)
-		self.show_option()
 
-	def show_option(self):
-		rover = self.current_rover
-		index = self.current_camera.get()
-		rover_cams = self.cam_dict[rover]
-		print(rover, rover_cams[index-1])
+	def reset_date(self, *args):
+		if self.sol_var.get():
+			self.date_var.set('')
 
+	def reset_sols(self, *args):
+		if self.date_var.get():
+			self.sol_var.set('')
+
+	def open_folder(self, rover):
+		for r in self.rovers:
+			if rover == r:
+				if os.path.exists(rover + '/'):
+					webbrowser.open('file:///' + os.path.realpath(rover + '/'))
+
+	def creds_win(self):
+		CredentialWindow()
+
+	def fetch_resources(self):
+		api_key = read_credentials()
+		if not api_key:
+			messagebox.showinfo('api key error', 'An Api key is required')
+			CredentialWindow()
+		else:
+			rover = self.current_rover
+			index = self.current_camera.get()
+			rover_cams = self.cam_dict[rover]
+			camera = rover_cams[index-1]
+			if camera == 'Any Camera':
+				camera = None
+
+			sol = self.sol_var.get()
+			date = self.date_var.get()
+
+			num_img = self.num_imgs.get()
+			if num_img <= 0:
+				num_img = 1
+			if num_img > 100:
+				num_img = 100
+			
+			thread = threading.Thread(target=self.fetch_urls)
+			thread.start()
+			self.poll_thread(thread)
+
+	def poll_thread(thread):
+		if thread.is_alive()
+		self.after()
+
+	def fetch_urls(self)
+			self.RIDownloader.fetch_urls(api_key, rover, camera=camera, sol=sol, date=date, num_img=num_img)
 
 if __name__ == '__main__':
 	root = tk.Tk()
