@@ -1,6 +1,8 @@
 import os
+import re
 import threading
 import webbrowser
+from datetime import date
 from functools import partial
 
 import tkinter as tk
@@ -8,7 +10,7 @@ import tkinter.ttk as ttk
 from tkinter import PhotoImage
 from tkinter import messagebox
 
-from services import RoverImageDownloader, CredentialWindow, read_credentials
+from services import RoverImageDownloader, rover_info, CredentialWindow, read_credentials
 
 
 class Application(tk.Frame):
@@ -86,12 +88,27 @@ class Application(tk.Frame):
 						command=self.fetch_resources)
 		self.fetch.grid(row=0, column=0, padx=(30,0), pady=10)
 
-		self.download = ttk.Button(self.bottomBox, text='Download Images', width=16, state=tk.DISABLED)
+		self.download = ttk.Button(self.bottomBox, text='Download Images', width=16, state=tk.DISABLED,
+						command=self.download_resc)
 		self.download.grid(row=0, column=1, padx=(30,0), pady=10)
 
 		self.open = ttk.Button(self.bottomBox, text='Open', width=12, state=tk.DISABLED,
 						command=lambda : self.open_folder(self.current_rover))
 		self.open.grid(row=0, column=2, padx=(30,0), pady=10)
+
+		# info_labels
+		self.l1 = tk.Label(self.infoFrame, text='', width=25, bg='dodgerblue3', fg='white',
+					font=('verdana', 8, 'bold'))
+		self.l1.grid(row=0, column=0, padx=10, pady=(5,3))
+		self.l2 = tk.Label(self.infoFrame, text='', width=25, bg='dodgerblue3', fg='white',
+					font=('verdana', 8, 'bold'))
+		self.l2.grid(row=0, column=1, padx=10, pady=(5,3))
+		self.l3 = tk.Label(self.infoFrame, text='', width=25, bg='dodgerblue3', fg='white',
+					font=('verdana', 8, 'bold'))
+		self.l3.grid(row=1, column=0, padx=45)
+		self.l4 = tk.Label(self.infoFrame, text='', width=25, bg='dodgerblue3', fg='white',
+					font=('verdana', 8, 'bold'))
+		self.l4.grid(row=1, column=1, padx=45)
 
 	def draw_date_frame(self):
 		ttk.Label(self.rightbar2, text='Enter Sol ( Martian Day )',
@@ -151,6 +168,25 @@ class Application(tk.Frame):
 			r += 1
 		self.current_camera.set(1)
 
+		self.fetch_info()
+
+	def fetch_info(self):
+		info_dict = rover_info(self.current_rover)
+
+		name = self.current_rover
+		landing_date = info_dict['landing-date']
+		status = info_dict['status']
+		if status == 'active':
+			max_sols = date.today() - date.fromisoformat(landing_date)
+			max_sols = max_sols.days - 1
+		else:
+			max_sols = info_dict['max-sols']
+
+		self.l1['text'] = f'name : {name}'
+		self.l2['text'] = f'landing-date : {landing_date}'
+		self.l3['text'] = f'status : {status}'
+		self.l4['text'] = f'max-sols : {max_sols}'
+
 	def reset_date(self, *args):
 		if self.sol_var.get():
 			self.date_var.set('')
@@ -169,6 +205,9 @@ class Application(tk.Frame):
 		CredentialWindow()
 
 	def fetch_resources(self):
+		self.download.config(state=tk.DISABLED)
+		self.open.config(state=tk.DISABLED)
+
 		api_key = read_credentials()
 		if not api_key:
 			messagebox.showinfo('api key error', 'An Api key is required')
@@ -183,23 +222,53 @@ class Application(tk.Frame):
 
 			sol = self.sol_var.get()
 			date = self.date_var.get()
+			if date and not re.match(r'\d\d\d\d-\d\d-\d\d', date):
+				messagebox.showinfo('Error', 'Invalid Date format')
+			else:
+				if not sol and not date:
+					messagebox.showinfo('Error', 'Enter sol or Earth date')
+				else:
+					num_img = self.num_imgs.get()
+					if num_img <= 0:
+						num_img = 1
+					if num_img > 100:
+						num_img = 100
+					
+					thread = threading.Thread(target=self.fetch_urls, 
+							args=(api_key, rover, camera, sol, date, num_img,))
+					thread.start()
+					self.poll_thread(thread)
 
-			num_img = self.num_imgs.get()
-			if num_img <= 0:
-				num_img = 1
-			if num_img > 100:
-				num_img = 100
-			
-			thread = threading.Thread(target=self.fetch_urls)
-			thread.start()
-			self.poll_thread(thread)
+	def poll_thread(self, thread):
+		if thread.is_alive():
+			self.after(100, lambda : self.poll_thread(thread))
+		else:
+			self.download.config(state=tk.NORMAL)
 
-	def poll_thread(thread):
-		if thread.is_alive()
-		self.after()
+	def fetch_urls(self, api_key, rover, camera, sol, date, num_img):
+			response = self.RIDownloader.fetch_urls(api_key, rover, camera, sol, date, num_img)
+			if response == 'error':
+				messagebox.showinfo('Error', 'No internet connection')
 
-	def fetch_urls(self)
-			self.RIDownloader.fetch_urls(api_key, rover, camera=camera, sol=sol, date=date, num_img=num_img)
+	def download_resc(self):
+		self.fetch.config(state=tk.DISABLED)
+
+		thread = threading.Thread(target=self.download_imgs)
+		thread.start()
+		self.poll_thread2(thread)
+
+	def poll_thread2(self, thread):
+		if thread.is_alive():
+			self.after(100, lambda : self.poll_thread2(thread))
+		else:
+			self.fetch.config(state=tk.NORMAL)
+			self.open.config(state=tk.NORMAL)
+
+	def download_imgs(self):
+		rover = self.current_rover
+		sol = self.sol_var.get()
+		date = self.date_var.get()
+		self.RIDownloader.download_images(rover, sol, date)
 
 if __name__ == '__main__':
 	root = tk.Tk()

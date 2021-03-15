@@ -1,0 +1,20 @@
+{
+	"Perseverance" : {
+		"landing-date" : "2021-02-18",
+		"status" : "active"
+	},
+	"Curiosity" : {
+		"landing-date" : "2012-08-06",
+		"status" : "active"
+	},
+	"Opportunity" : {
+		"landing-date" : "2004-01-25",
+		"status" : "inactive",
+		"max-sols" : 5352
+	},
+	"Spirit" : {
+		"landing-date" : "2004-01-04",
+		"status" : "inactive",
+		"max-sols" : 2210
+	}
+}

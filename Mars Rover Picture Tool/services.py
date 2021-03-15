@@ -3,6 +3,7 @@ import json
 import webbrowser
 import tkinter as tk
 from math import ceil
+import concurrent.futures
 
 import requests
 
@@ -22,23 +23,56 @@ class RoverImageDownloader:
 		if sol:
 			url += f'sol={sol}&'
 		if date:
-			url += f'date={date}&'
+			url += f'earth_date={date}&'
 	
 		url += f'pages={pages}&'
 		url += f'api_key={api_key}'
 		print(url)
 		
+		try:
+			r = requests.get(url)
+			im_list = r.json()['photos']
+			for dct in im_list:
+				img = dct['img_src']
+				self.image_urls.append(img)
+
+			self.image_urls = self.image_urls[:num_img]
+			return 'done'
+		except:
+			return 'error'
+
+	def download_images(self, rover, sol, date):
+		if not os.path.exists(f'{rover}/'):
+			os.mkdir(f'{rover}')
+
+		rovers = [rover for i in range(len(self.image_urls))]
+		sols = [None for i in range(len(self.image_urls))]
+		dates = [None for i in range(len(self.image_urls))]
+		if sol:
+			sols = [sol for i in range(len(self.image_urls))]
+		if date:
+			dates = [date for i in range(len(self.image_urls))]
+		with concurrent.futures.ThreadPoolExecutor() as executor:
+			executor.map(self.download_img, self.image_urls, rovers, sols ,dates)
+
+	def download_img(self, url, rover, sol=None, date=None):
+		name = url.split('/')[-1]
+		if sol:
+			fname = f'{rover}/sol-{sol}-{name}'
+		elif date:
+			fname = f'{rover}/date-{date}-{name}'
 		r = requests.get(url)
-		im_list = r.json()['photos']
-		for dct in im_list:
-			img = dct['img_src']
-			self.image_urls.append(img)
+		with open(fname, 'wb') as f:
+			f.write(r.content)
 
-		print(self.image_urls[:num_img])
+def rover_info(rover):
+	json_file = 'data/info.json'
 
+	if os.path.exists(json_file):
+		with open(json_file, 'r') as file:
+			dct = json.load(file)
+			return dct[rover]
 
-	def download_images(self):
-		pass
 
 class CredentialWindow(tk.Toplevel):
 	def __init__(self):
